@@ -1,0 +1,34 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+dist/
+build/
+*.egg
+
+# البيئة الافتراضية
+venv/
+.venv/
+env/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# الإخراج والمخرجات المؤقتة
+output/*
+!output/.gitkeep
+*.db
+*.sqlite
+
+# Jupyter
+.ipynb_checkpoints/
+
+# نظام التشغيل
+.DS_Store
+Thumbs.db
+
+# نماذج HuggingFace (كبيرة)
+models/

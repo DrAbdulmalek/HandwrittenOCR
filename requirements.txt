@@ -1,0 +1,30 @@
+# HandwrittenOCR - مكتبات مطلوبة
+# ================================
+
+# معالجة الصور والرؤية الحاسوبية
+Pillow>=10.0.0
+opencv-python-headless>=4.8.0
+numpy>=1.24.0
+
+# تحويل PDF إلى صور
+pdf2image>=1.16.0
+
+# محركات OCR
+easyocr>=1.7.0
+pytesseract>=0.3.10
+transformers>=4.36.0
+torch>=2.0.0
+torchvision>=0.15.0
+
+# التصحيح الإملائي
+pyspellchecker>=0.7.0
+ar-corrector>=0.6.0
+
+# كشف اللغة
+langdetect>=1.0.9
+
+# واجهة تفاعلية (اختياري - للعمل في Jupyter)
+ipywidgets>=8.0.0
+
+# تحليل البيانات
+pandas>=2.0.0
