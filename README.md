@@ -11,6 +11,8 @@
 - **واجهة مراجعة تفاعلية**: Jupyter (ipywidgets) أو CLI
 - **تخزين منظم**: SQLite + CSV + JSON للإحصائيات
 - **وضعان**: محلي أو Google Colab
+- **تخزين مؤقت للنماذج**: cache_dir + EasyOCR symlink على Drive
+- **دعم HF_TOKEN**: للنماذج المحمية عبر Colab Secrets
 
 ## التثبيت
 
@@ -34,7 +36,7 @@ pip install -r requirements.txt
 
 ## الاستخدام
 
-### التشغيل الأساسي
+### التشغيل الأساسي (محلي)
 
 ```bash
 # تشغيل مع ملف PDF محدد
@@ -45,6 +47,9 @@ python run.py --pdf document.pdf --pages 1 10
 
 # تحديد مجلد الإخراج
 python run.py --pdf document.pdf --output ./results
+
+# مع توكن Hugging Face وتخزين مؤقت
+python run.py --pdf document.pdf --hf-token hf_xxx --cache-dir ./models_cache
 ```
 
 ### في Google Colab
@@ -53,7 +58,16 @@ python run.py --pdf document.pdf --output ./results
 from config import Config
 from src.main import main
 
+# بدون توكن
 config = Config.from_colab_drive(pdf_name="document.pdf")
+main(config)
+
+# مع توكن من Secrets
+from google.colab import userdata
+config = Config.from_colab_drive(
+    pdf_name="document.pdf",
+    hf_token=userdata.get("HF_TOKEN")
+)
 main(config)
 ```
 
@@ -70,7 +84,9 @@ config = Config(
     output_dir="./results",
     pages_start=1,
     pages_end=5,
-    dpi=300
+    dpi=300,
+    model_cache_dir="./models_cache",
+    hf_token="hf_xxx",
 )
 main(config)
 ```
@@ -121,10 +137,14 @@ HandwrittenOCR/
 | مسارات مُرمَّجة يدوياً | نظام Config قابل للتخصيص |
 | `SpellChecker.correction()` تُستخدم على جمل كاملة | تصحيح كلمة بكلمة مع حفظ علامات الترقيم |
 | `preprocess_image` ترجع binary لكن `recognize_word` تتوقع BGR | فصل الصورة الثنائية عن الصورة المحسنة |
+| الكلمات تُقطع من الصورة الثنائية بدلاً من الأصلية | قص الكلمات من `img_bgr` الأصلية |
 | `df` متغير محلي يخرج عن التزامن مع DB عند الحذف | استخدام `HandwritingDB` مباشرة |
+| EasyOCR يأخذ أول نتيجة فقط | اختيار النص بأعلى ثقة `max(res, key=lambda r: r[2])` |
 | عدم وجود معالجة أخطاء | try/except في كل نقطة فشل محتملة |
 | كل شيء في خلايا Jupyter | وحدات Python منفصلة ومختبرة |
 | `cv2_imshow` من Colab فقط | دعم matplotlib + CLI + Jupyter |
+| لا يوجد تخزين مؤقت للنماذج | `cache_dir` + EasyOCR symlink على Drive |
+| لا يدعم HF_TOKEN | دعم توكن من Colab Secrets أو CLI |
 
 ## الترخيص
 

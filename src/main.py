@@ -25,14 +25,23 @@ def main(config: Config | None = None):
     if config is None:
         config = Config()
 
+    # تطبيق إعدادات التوكن والتخزين المؤقت
+    config.apply_hf_token()
+    config.apply_cache_env()
+
     # إنشاء المجلدات
     config.ensure_dirs()
+
+    # إعداد رابط EasyOCR (لـ Colab)
+    config.setup_easyocr_symlink()
 
     # إعداد التسجيل
     logger = setup_logging(config)
     logger.info("بدء تشغيل HandwrittenOCR")
     logger.info(f"ملف PDF: {config.pdf_path}")
     logger.info(f"مجلد الإخراج: {config.output_dir}")
+    if config.model_cache_dir:
+        logger.info(f"تخزين مؤقت: {config.model_cache_dir}")
 
     # تحميل المدققات الإملائية
     init_correctors()
@@ -43,6 +52,8 @@ def main(config: Config | None = None):
         trocr_model_name=config.trocr_model_name,
         ocr_languages=config.ocr_languages,
         max_text_length=config.max_text_length,
+        cache_dir=config.model_cache_dir,
+        hf_token=config.hf_token,
     )
     logger.info(f"تم تحميل النماذج في {time.time() - start:.2f} ثانية")
 

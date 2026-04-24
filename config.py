@@ -18,6 +18,11 @@ class Config:
     pdf_path: str = "input.pdf"
     output_dir: str = str(Path.home() / "Handwriting_Dataset")
 
+    # --- إعدادات النماذج والتخزين المؤقت ---
+    hf_token: str = ""
+    model_cache_dir: str = ""
+    easyocr_persistent: bool = False
+
     # --- إعدادات معالجة الصور ---
     dpi: int = 300
     clahe_clip_limit: float = 2.0
@@ -67,19 +72,91 @@ class Config:
     def stats_json(self) -> str:
         return os.path.join(self.logs_dir, "processing_stats.json")
 
+    @property
+    def easyocr_drive_path(self) -> str:
+        """مسار تخزين نماذج EasyOCR على Drive (لـ Colab)"""
+        return os.path.join(self.output_dir, ".EasyOCR")
+
+    @property
+    def easyocr_local_path(self) -> str:
+        """المسار المحلي لنماذج EasyOCR"""
+        return str(Path.home() / ".EasyOCR")
+
     def ensure_dirs(self) -> None:
         """إنشاء المجلدات المطلوبة إذا لم تكن موجودة"""
         os.makedirs(self.output_dir, exist_ok=True)
         os.makedirs(self.logs_dir, exist_ok=True)
+        if self.model_cache_dir:
+            os.makedirs(self.model_cache_dir, exist_ok=True)
+
+    def apply_hf_token(self) -> None:
+        """
+        تطبيق توكن Hugging Face على متغيرات البيئة.
+        يُستخدم عند تحميل النماذج الخاصة أو المحمية.
+        """
+        if self.hf_token:
+            os.environ["HF_TOKEN"] = self.hf_token
+            os.environ["HUGGING_FACE_HUB_TOKEN"] = self.hf_token
+
+    def apply_cache_env(self) -> None:
+        """
+        تطبيق مسارات التخزين المؤقت على متغيرات البيئة
+        لكي تستخدمها مكتبات transformers و torch.
+        """
+        if self.model_cache_dir:
+            os.environ["TRANSFORMERS_CACHE"] = self.model_cache_dir
+            os.environ["TORCH_HOME"] = self.model_cache_dir
+            os.environ["HF_HOME"] = self.model_cache_dir
+
+    def setup_easyocr_symlink(self) -> None:
+        """
+        نقل نماذج EasyOCR إلى Drive وإنشاء رابط رمزي.
+        يعمل فقط في بيئة Colab مع easyocr_persistent=True.
+        """
+        if not self.easyocr_persistent:
+            return
+
+        drive_path = self.easyocr_drive_path
+        local_path = self.easyocr_local_path
+
+        # نقل النماذج إلى Drive إذا لم تكن موجودة هناك
+        if os.path.exists(local_path) and not os.path.exists(drive_path):
+            import shutil
+            print("جاري نقل نماذج EasyOCR إلى Drive للمرة الأولى...")
+            shutil.move(local_path, drive_path)
+
+        # إنشاء الرابط الرمزي
+        if not os.path.islink(local_path):
+            if os.path.exists(local_path):
+                import shutil
+                shutil.rmtree(local_path)
+            os.symlink(drive_path, local_path)
+            print("تم ربط نماذج EasyOCR بـ Google Drive بنجاح")
 
     @classmethod
-    def from_colab_drive(cls, pdf_name: str = "python notes.pdf",
-                         output_folder: str = "Handwriting_Dataset") -> "Config":
-        """إنشاء إعدادات مخصصة لـ Google Colab مع Drive"""
+    def from_colab_drive(
+        cls,
+        pdf_name: str = "python notes.pdf",
+        output_folder: str = "Handwriting_Dataset",
+        hf_token: str = ""
+    ) -> "Config":
+        """
+        إنشاء إعدادات مخصصة لـ Google Colab مع Drive.
+
+        Parameters:
+            pdf_name: اسم ملف PDF على Drive
+            output_folder: اسم مجلد الإخراج على Drive
+            hf_token: توكن Hugging Face (اختياري)
+        """
         base = "/content/drive/MyDrive"
+        output_dir = os.path.join(base, output_folder)
+        model_cache = os.path.join(output_dir, "models_cache")
         return cls(
             pdf_path=os.path.join(base, pdf_name),
-            output_dir=os.path.join(base, output_folder),
+            output_dir=output_dir,
+            model_cache_dir=model_cache,
+            hf_token=hf_token,
+            easyocr_persistent=True,
         )
 
     @classmethod

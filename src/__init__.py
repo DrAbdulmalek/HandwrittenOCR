@@ -1,6 +1,3 @@
-# HandwrittenOCR
-# استخراج وتصحيح نصوص الخط اليدوي
-
 """
 HandwrittenOCR - مشروع استخراج وتصحيح النصوص من الخط اليدوي
 ================================================================
@@ -21,4 +18,4 @@ from src.pdf_processor import PDFProcessor
 from src.review_ui import ReviewUI
 from config import Config
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
