@@ -1,69 +1,44 @@
 # HandwrittenOCR
 
-> مشروع استخراج وتصحيح نصوص الخط اليدوي من ملفات PDF
+> مشروع استخراج وتصحيح نصوص الخط اليدوي من ملفات PDF - نظام التحسين المستمر
 
 ## المميزات
 
-- **تعرف متعدد المحركات**: TrOCR (أساسي) + EasyOCR (بديل) + Tesseract
+- **تعرف متعدد المحركات**: TrOCR (أساسي) + EasyOCR (بديل) + Ensemble
 - **دعم ثنائي اللغة**: العربية والإنجليزية
-- **تصحيح إملائي ذكي**: ar-corrector للعربية + pyspellchecker للإنجليزية
-- **معالجة مسبقة متقدمة**: تسوية الميل، CLAHE، إزالة الضوضاء، Thresholding
-- **واجهة مراجعة تفاعلية**: Jupyter (ipywidgets) أو CLI
-- **تخزين منظم**: SQLite + CSV + JSON للإحصائيات
-- **وضعان**: محلي أو Google Colab
-- **تخزين مؤقت للنماذج**: cache_dir + EasyOCR symlink على Drive
-- **دعم HF_TOKEN**: للنماذج المحمية عبر Colab Secrets
+- **تصحيح إملائي ذكي**: ar-corrector + pyspellchecker
+- **قاموس تصحيح مستمر**: يتعلم من مراجعات المستخدم تلقائياً
+- **تجزئة ذكية**: EasyOCR أولاً، الكنتورات كبديل
+- **معالجة مسبقة**: تسوية الميل، CLAHE، إزالة الضوضاء، Thresholding
+- **واجهة مراجعة**: Jupyter (ipywidgets) أو CLI - تعرض غير المراجعة أولاً
+- **تصدير بيانات التدريب**: JSONL مع تقسيم train/val
+- **رفع إلى HuggingFace**: مباشرة من الكود
+- **تدريب LoRA**: Fine-tune TrOCR على تصحيحات المستخدم
+- **إعادة تجميع الجمل**: مع دعم RTL للعربية
+- **تخزين مؤقت**: cache_dir + EasyOCR symlink على Drive
 
 ## التثبيت
 
-### المتطلبات النظامية
-
 ```bash
-# Ubuntu/Debian
 sudo apt-get install -y poppler-utils tesseract-ocr
-
-# macOS
-brew install poppler tesseract
-```
-
-### تثبيت المكتبات
-
-```bash
-git clone https://github.com/DrAbdulmalek/HandwrittenOCR.git
-cd HandwrittenOCR
 pip install -r requirements.txt
 ```
 
 ## الاستخدام
 
-### التشغيل الأساسي (محلي)
+### التشغيل الأساسي
 
 ```bash
-# تشغيل مع ملف PDF محدد
-python run.py --pdf path/to/document.pdf
-
-# تحديد نطاق الصفحات
 python run.py --pdf document.pdf --pages 1 10
-
-# تحديد مجلد الإخراج
-python run.py --pdf document.pdf --output ./results
-
-# مع توكن Hugging Face وتخزين مؤقت
-python run.py --pdf document.pdf --hf-token hf_xxx --cache-dir ./models_cache
 ```
 
 ### في Google Colab
 
 ```python
+from google.colab import userdata
 from config import Config
 from src.main import main
 
-# بدون توكن
-config = Config.from_colab_drive(pdf_name="document.pdf")
-main(config)
-
-# مع توكن من Secrets
-from google.colab import userdata
 config = Config.from_colab_drive(
     pdf_name="document.pdf",
     hf_token=userdata.get("HF_TOKEN")
@@ -71,80 +46,74 @@ config = Config.from_colab_drive(
 main(config)
 ```
 
-أو استخدم الدفتر الجاهز: `notebooks/handwritten_ocr_colab.ipynb`
-
-### كوحدة Python
-
-```python
-from config import Config
-from src.main import main
-
-config = Config(
-    pdf_path="input.pdf",
-    output_dir="./results",
-    pages_start=1,
-    pages_end=5,
-    dpi=300,
-    model_cache_dir="./models_cache",
-    hf_token="hf_xxx",
-)
-main(config)
-```
-
-### واجهة المراجعة فقط (بدون معالجة)
+### نظام التحسين المستمر
 
 ```python
 from config import Config
 from src.database import HandwritingDB
-from src.review_ui import ReviewUI
+from src.export import export_finetuning_dataset, push_to_huggingface
+from src.finetuning import finetune_trocr_lora
+from src.reconstruction import reconstruct_sentences
+from src.recognition import OCREngine
 
-config = Config(output_dir="./results")
+# 1. معالجة ومراجعة
+# ... (run main first, review words)
+
+# 2. تصدير بيانات التدريب
+config = Config.from_colab_drive(hf_token="hf_xxx")
 db = HandwritingDB(config.db_path)
-ui = ReviewUI(db, config.feedback_csv)
-ui.launch()
+export_finetuning_dataset(db, config.export_dir)
+
+# 3. رفع إلى HuggingFace
+push_to_huggingface(config.export_dir, "user/handwriting-dataset", config.hf_token)
+
+# 4. تدريب LoRA
+ocr_engine = OCREngine(...)
+finetune_trocr_lora(
+    ocr_engine.trocr_model, ocr_engine.trocr_processor,
+    db, ocr_engine.device, config.lora_save_path
+)
+
+# 5. إعادة تجميع الجمل
+df_sentences = reconstruct_sentences(db)
 ```
 
 ## هيكل المشروع
 
 ```
 HandwrittenOCR/
-├── README.md              # هذا الملف
-├── requirements.txt        # المكتبات المطلوبة
-├── config.py              # إعدادات المشروع المركزية
-├── run.py                 # نقطة الدخول (CLI)
+├── config.py              # إعدادات مركزية
+├── run.py                 # نقطة الدخول CLI
+├── requirements.txt
 ├── src/
-│   ├── __init__.py
 │   ├── main.py            # التشغيل الرئيسي
-│   ├── preprocessing.py   # معالجة الصور المسبقة
-│   ├── recognition.py     # محرك التعرف (TrOCR + EasyOCR)
-│   ├── correction.py      # التصحيح الإملائي
-│   ├── database.py        # إدارة قاعدة البيانات (SQLite)
+│   ├── preprocessing.py   # معالجة الصور + تجزئة ذكية
+│   ├── recognition.py     # Ensemble التعرف
+│   ├── correction.py      # تصحيح + قاموس مستمر
+│   ├── database.py        # SQLite v2 (مع إحداثيات)
 │   ├── pdf_processor.py   # معالج PDF
-│   ├── review_ui.py       # واجهة المراجعة (Jupyter + CLI)
-│   └── logger.py          # نظام التسجيل
+│   ├── review_ui.py       # واجهة المراجعة
+│   ├── export.py          # تصدير + رفع HF
+│   ├── finetuning.py      # LoRA training
+│   ├── reconstruction.py  # تجميع الجمل
+│   └── logger.py          # تسجيل
 ├── notebooks/
-│   └── handwritten_ocr_colab.ipynb  # دفتر Google Colab
-├── tests/
-│   └── __init__.py
-└── output/                # مجلد الإخراج (gitignored)
+│   └── handwritten_ocr_colab.ipynb
+└── tests/
 ```
 
-## التصحيحات المطبقة على الكود الأصلي
+## التصحيحات المطبقة (التي يجب حفظها للمرات القادمة)
 
-| المشكلة | التصحيح |
-|---------|---------|
-| اعتماد كامل على Google Colab | هيكل مشروع Python مستقل مع وضع Colab اختياري |
-| مسارات مُرمَّجة يدوياً | نظام Config قابل للتخصيص |
-| `SpellChecker.correction()` تُستخدم على جمل كاملة | تصحيح كلمة بكلمة مع حفظ علامات الترقيم |
-| `preprocess_image` ترجع binary لكن `recognize_word` تتوقع BGR | فصل الصورة الثنائية عن الصورة المحسنة |
-| الكلمات تُقطع من الصورة الثنائية بدلاً من الأصلية | قص الكلمات من `img_bgr` الأصلية |
-| `df` متغير محلي يخرج عن التزامن مع DB عند الحذف | استخدام `HandwritingDB` مباشرة |
-| EasyOCR يأخذ أول نتيجة فقط | اختيار النص بأعلى ثقة `max(res, key=lambda r: r[2])` |
-| عدم وجود معالجة أخطاء | try/except في كل نقطة فشل محتملة |
-| كل شيء في خلايا Jupyter | وحدات Python منفصلة ومختبرة |
-| `cv2_imshow` من Colab فقط | دعم matplotlib + CLI + Jupyter |
-| لا يوجد تخزين مؤقت للنماذج | `cache_dir` + EasyOCR symlink على Drive |
-| لا يدعم HF_TOKEN | دعم توكن من Colab Secrets أو CLI |
+1. `!mv`/`!rm`/`!ln` shell commands -> `shutil.move`/`shutil.rmtree`/`os.symlink`
+2. `SpellChecker.correction()` على جمل كاملة -> كلمة بكلمة مع حفظ الترقيم
+3. `preprocess_image` ترجع binary فقط -> `(binary, enhanced)`
+4. الكلمات تُقطع من الصورة الثنائية -> من `img_bgr` الأصلية
+5. EasyOCR يأخذ أول نتيجة -> `max(results, key=lambda r: r[2])`
+6. `cv2_imshow` من Colab -> `cv2.imwrite` + مسارات عامة
+7. المسارات المرمَّجة يدوياً -> `Config` dataclass
+8. `df` محلي يخرج عن التزامن مع DB -> `HandwritingDB` مباشرة
+9. Status: `'yes'/'no'` -> `'verified'/'unverified'`
+10. DB schema v1 -> v2 مع ترقية تلقائية (migration)
 
 ## الترخيص
 

@@ -16,26 +16,14 @@ from src.review_ui import ReviewUI
 
 
 def main(config: Config | None = None):
-    """
-    التشغيل الرئيسي للتطبيق.
-
-    Parameters:
-        config: إعدادات المشروع (اختياري - تستخدم القيم الافتراضية)
-    """
     if config is None:
         config = Config()
 
-    # تطبيق إعدادات التوكن والتخزين المؤقت
     config.apply_hf_token()
     config.apply_cache_env()
-
-    # إنشاء المجلدات
     config.ensure_dirs()
-
-    # إعداد رابط EasyOCR (لـ Colab)
     config.setup_easyocr_symlink()
 
-    # إعداد التسجيل
     logger = setup_logging(config)
     logger.info("بدء تشغيل HandwrittenOCR")
     logger.info(f"ملف PDF: {config.pdf_path}")
@@ -54,6 +42,7 @@ def main(config: Config | None = None):
         max_text_length=config.max_text_length,
         cache_dir=config.model_cache_dir,
         hf_token=config.hf_token,
+        trocr_default_confidence=config.trocr_default_confidence,
     )
     logger.info(f"تم تحميل النماذج في {time.time() - start:.2f} ثانية")
 
@@ -76,6 +65,8 @@ def main(config: Config | None = None):
     print(f"  الكلمات:       {stats['total_words']}")
     print(f"  إخفاقات OCR:   {stats['ocr_failures']}")
     print(f"  تصحيحات:       {stats['spell_corrections']}")
+    print(f"  تصحيحات قاموس:{stats['dict_corrections']}")
+    print(f"  حجم القاموس:   {stats['correction_dict_size']}")
     print(f"  الوقت:         {stats['time_seconds']:.2f} ثانية")
     print(f"  متوسط/كلمة:    {stats['avg_time_per_word']:.4f} ثانية")
     print("=" * 50)
@@ -85,6 +76,7 @@ def main(config: Config | None = None):
     print(f"  سجل الأحداث:     {config.log_file}")
     print(f"  إحصائيات:        {config.stats_json}")
     print(f"  تصحيحات:         {config.feedback_csv}")
+    print(f"  قاموس التصحيح:   {config.correction_dict_path}")
 
     # تشغيل واجهة المراجعة
     print("\nتشغيل واجهة المراجعة...")
