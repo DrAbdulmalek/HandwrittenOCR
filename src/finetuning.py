@@ -2,6 +2,7 @@
 HandwrittenOCR - تدريب LoRA على TrOCR
 ========================================
 Fine-tune TrOCR باستخدام LoRA على تصحيحات المستخدم.
+بعد التدريب يُحدَّث النموذج في OCREngine تلقائياً.
 """
 
 import os
@@ -13,10 +14,8 @@ logger = logging.getLogger("HandwrittenOCR")
 
 
 def finetune_trocr_lora(
-    trocr_model,
-    trocr_processor,
+    ocr_engine,
     db,
-    device,
     save_path: str,
     min_samples: int = 100,
     epochs: int = 3,
@@ -30,11 +29,12 @@ def finetune_trocr_lora(
     """
     تدريب TrOCR باستخدام LoRA على البيانات الموثقة.
 
+    بعد التدريب الناجح يُحدَّث ocr_engine.trocr_model
+    بالنموذج الجديد تلقائياً.
+
     Parameters:
-        trocr_model: نموذج TrOCR
-        trocr_processor: معالج TrOCR
+        ocr_engine: كائن OCREngine (يحتوي trocr_model و trocr_processor)
         db: قاعدة البيانات
-        device: الجهاز (cuda/cpu)
         save_path: مسار حفظ النموذج
         min_samples: الحد الأدنى من العينات للتدريب
         epochs: عدد الحقب
@@ -53,21 +53,20 @@ def finetune_trocr_lora(
         from torch.optim import AdamW
         from torch.utils.data import Dataset, DataLoader
     except ImportError:
-        logger.error(
-            "peft غير مثبت. ثبّته بـ: pip install peft"
-        )
+        logger.error("peft غير مثبت. ثبّته بـ: pip install peft")
         return False
 
     if lora_target_modules is None:
         lora_target_modules = ["query", "value"]
 
+    trocr_model = ocr_engine.trocr_model
+    trocr_processor = ocr_engine.trocr_processor
+    device = ocr_engine.device
+
     # فحص عدد العينات
     verified = db.get_verified()
     if len(verified) < min_samples:
-        print(
-            f"لديك {len(verified)} عينة فقط. "
-            f"الحد الأدنى المطلوب: {min_samples}."
-        )
+        print(f"لديك {len(verified)} عينة فقط. الحد الأدنى المطلوب: {min_samples}.")
         return False
 
     print(f"بدء التدريب على {len(verified)} عينة...")
@@ -84,8 +83,6 @@ def finetune_trocr_lora(
     model.train()
 
     # إنشاء مجموعة البيانات
-    import pandas as pd
-
     class HandwritingDataset(Dataset):
         def __init__(self, records):
             self.records = records
@@ -136,7 +133,12 @@ def finetune_trocr_lora(
     model.save_pretrained(save_path)
     trocr_processor.save_pretrained(save_path)
 
+    # تحديث النموذج في OCREngine تلقائياً
+    ocr_engine.trocr_model = model
+    ocr_engine.lora_loaded = True
+
     print(f"تم حفظ النموذج في: {save_path}")
+    print("تم تحديث النموذج في محرك التعرف تلقائياً")
     logger.info(f"تم تدريب LoRA وحفظه في: {save_path}")
 
     return True

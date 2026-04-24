@@ -8,8 +8,10 @@ HandwrittenOCR - محرك التعرف على النصوص
 - دعم cache_dir لتحميل النماذج من مسار مخصص
 - دعم HF_TOKEN للنماذج المحمية
 - EasyOCR يختار النص بأعلى ثقة
+- تحميل تلقائي لنموذج LoRA المُحسَّن إذا وُجد
 """
 
+import os
 import cv2
 import numpy as np
 import torch
@@ -40,7 +42,9 @@ class OCREngine:
         cache_dir: str = "",
         hf_token: str = "",
         trocr_default_confidence: float = 0.7,
+        lora_save_path: str = "",
     ):
+        self.lora_loaded = False
         self.max_text_length = max_text_length
         self.trocr_default_confidence = trocr_default_confidence
 
@@ -74,6 +78,12 @@ class OCREngine:
             logger.error(f"فشل تحميل TrOCR: {e}")
             raise
 
+        # تحميل نموذج LoRA المُحسَّن إذا كان موجوداً
+        if lora_save_path and os.path.exists(lora_save_path):
+            self._load_lora_model(lora_save_path)
+        else:
+            logger.info("يستخدم النموذج الأساسي (لا يوجد fine-tuning بعد)")
+
         # تحميل EasyOCR
         if ocr_languages is None:
             ocr_languages = ["en", "ar"]
@@ -81,13 +91,25 @@ class OCREngine:
         self.easy_reader = easyocr.Reader(ocr_languages)
         logger.info("تم تحميل EasyOCR بنجاح")
 
-    def recognize_word(self, img_bgr: np.ndarray) -> str:
+    def _load_lora_model(self, lora_save_path: str) -> None:
         """
-        التعرف على كلمة: TrOCR أولاً ثم EasyOCR كبديل.
+        تحميل نموذج LoRA المُحسَّن إذا كان موجوداً.
+        يُطبَّق على النموذج الأساسي لتعزيز دقته.
+        """
+        try:
+            from peft import PeftModel
+            self.trocr_model = PeftModel.from_pretrained(
+                self.trocr_model, lora_save_path
+            ).to(self.device)
+            self.lora_loaded = True
+            logger.info(f"تم تحميل النموذج المُحسَّن (LoRA) من: {lora_save_path}")
+        except ImportError:
+            logger.warning("peft غير مثبت - لن يتم تحميل نموذج LoRA")
+        except Exception as e:
+            logger.warning(f"فشل تحميل نموذج LoRA: {e} - سيتم استخدام النموذج الأساسي")
 
-        Returns:
-            النص المعترف (سلسلة فارغة عند الفشل)
-        """
+    def recognize_word(self, img_bgr: np.ndarray) -> str:
+        """التعرف على كلمة: TrOCR أولاً ثم EasyOCR كبديل."""
         if img_bgr is None or img_bgr.size == 0:
             return ""
         text = self._recognize_trocr(img_bgr)
@@ -104,11 +126,6 @@ class OCREngine:
         """
         التعرف بالـ Ensemble: يجمع نتائج TrOCR و EasyOCR
         ويختار الأفضل حسب الثقة.
-
-        Parameters:
-            img_bgr: صورة الكلمة BGR
-            easyocr_raw: نتيجة EasyOCR الخام [bbox, text, conf]
-                         (اختياري - إذا توفرت تُستخدم مباشرة)
 
         Returns:
             tuple: (text, confidence, model_source, is_low_confidence)
@@ -146,7 +163,6 @@ class OCREngine:
         if not results:
             return "", 0.0, "none", True
 
-        # اختيار النص بأعلى ثقة
         best = max(results, key=lambda x: x[2])
         text, confidence, source = best
         is_low = confidence < 0.5
@@ -154,12 +170,7 @@ class OCREngine:
         return text, confidence, source, is_low
 
     def detect_words_full(self, img_bgr: np.ndarray) -> list:
-        """
-        كشف الكلمات مع الإحداثيات والنص والثقة باستخدام EasyOCR.
-
-        Returns:
-            قائمة بـ [bbox, text, conf] لكل كلمة
-        """
+        """كشف الكلمات مع الإحداثيات باستخدام EasyOCR."""
         try:
             return self.easy_reader.readtext(img_bgr, detail=1)
         except Exception as e:

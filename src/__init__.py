@@ -24,4 +24,4 @@ from src.finetuning import finetune_trocr_lora
 from src.reconstruction import reconstruct_sentences
 from config import Config
 
-__version__ = "2.0.0"
+__version__ = "2.1.0"

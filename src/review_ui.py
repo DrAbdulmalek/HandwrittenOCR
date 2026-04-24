@@ -4,15 +4,14 @@ HandwrittenOCR - الواجهة التفاعلية للمراجعة
 واجهة لمراجعة وتصحيح نتائج OCR يدوياً.
 تدعم Jupyter (ipywidgets) ووضع CLI.
 
-v2: تعرض فقط الكلمات غير المراجعة (unverified)
-مرتبة حسب الثقة (الأقل أولاً) لتسهيل المراجعة.
+v3: إزالة العناصر المؤكدة/المحذوفة من العرض فوراً
+مع تعامل صحيح مع الحالات الحدية (df فارغ).
 """
 
 import logging
 import pandas as pd
 import os
 from datetime import datetime
-from typing import Optional
 
 logger = logging.getLogger("HandwrittenOCR")
 
@@ -29,7 +28,8 @@ class ReviewUI:
     """
     واجهة مراجعة تفاعلية لنتائج OCR.
 
-    v2: تعرض الكلمات غير المراجعة مرتبة حسب الثقة.
+    v3: العناصر المؤكدة/المحذوفة تُزال من العرض فوراً
+    مع تعامل صحيح مع قائمة فارغة.
     """
 
     def __init__(self, db, feedback_csv: str):
@@ -75,7 +75,7 @@ class ReviewUI:
     # --- واجهة Jupyter (ipywidgets) ---
 
     def _launch_jupyter_ui(self) -> None:
-        """تشغيل واجهة Jupyter - تعرض unverified مرتبة حسب الثقة"""
+        """واجهة Jupyter v3 - إزالة العناصر من العرض فوراً"""
         words = self.db.get_unverified(order_by_confidence=True)
 
         if not words:
@@ -88,10 +88,6 @@ class ReviewUI:
         txt_input = widgets.Text(
             description="النص الصحيح:",
             layout=widgets.Layout(width="95%"),
-        )
-        status_check = widgets.Checkbox(
-            value=True,
-            description="تضمين في التدريب",
         )
         progress = widgets.IntProgress(
             min=0,
@@ -108,7 +104,6 @@ class ReviewUI:
                 row = words[idx]
                 img_widget.value = row["image_data"]
                 txt_input.value = row["predicted_text"] or ""
-                status_check.value = True
                 progress.value = idx
                 conf = row.get("confidence", 0)
                 src = row.get("model_source", "none")
@@ -117,59 +112,87 @@ class ReviewUI:
                     f"(ID: {row['image_id']})"
                 )
                 conf_label.value = f"الثقة: {conf:.2f} | المصدر: {src}"
+            else:
+                # حالة: جميع العناصر تمت مراجعتها أو حذفها
+                img_widget.value = b""
+                txt_input.value = ""
+                conf_label.value = ""
+                if len(words) == 0:
+                    info_label.value = "اكتملت المراجعة"
+                else:
+                    info_label.value = "لا توجد عناصر متبقية لعرضها"
+                progress.value = progress.max
 
         def on_confirm(b):
             idx = current_index[0]
-            if idx >= len(words):
+            if not (0 <= idx < len(words)):
+                print("لا توجد عناصر للمراجعة أو اكتملت المراجعة.")
                 return
+
             row = words[idx]
             rid = row["image_id"]
             original = row["predicted_text"] or ""
             corrected = txt_input.value
-            new_status = "verified" if status_check.value else "unverified"
 
-            self.db.update_word(rid, corrected, new_status)
+            # تحديث قاعدة البيانات
+            self.db.update_word(rid, corrected, "verified")
 
+            # تسجيل التصحيح
             if original != corrected:
-                self.log_correction(rid, original, corrected, new_status)
+                self.log_correction(rid, original, corrected, "verified")
 
-            # انتقل للتالي (أو أعلن النهاية)
-            current_index[0] = idx + 1
-            if current_index[0] < len(words):
-                update_view()
-            else:
+            # إزالة من العرض المحلي فوراً
+            words.pop(idx)
+            progress.max = max(0, len(words) - 1)
+
+            # تعديل المؤشر
+            if len(words) == 0:
+                current_index[0] = 0
+            elif idx >= len(words):
+                current_index[0] = len(words) - 1
+
+            update_view()
+            if len(words) == 0:
                 print("اكتملت المراجعة")
 
         def on_prev(b):
             current_index[0] = max(0, current_index[0] - 1)
             update_view()
 
-        def on_skip(b):
+        def on_next(b):
             current_index[0] = min(len(words) - 1, current_index[0] + 1)
-            if current_index[0] < len(words):
-                update_view()
-            else:
-                print("اكتملت المراجعة")
+            update_view()
 
         def on_delete(b):
             idx = current_index[0]
-            if idx >= len(words):
+            if not (0 <= idx < len(words)):
+                print("لا توجد عناصر للحذف.")
                 return
+
             rid = words[idx]["image_id"]
             self.db.delete_word(rid)
+
+            # إزالة من العرض المحلي فوراً
             words.pop(idx)
             progress.max = max(0, len(words) - 1)
-            if idx >= len(words) and idx > 0:
-                current_index[0] = len(words) - 1
-            update_view()
 
-        btn_confirm = widgets.Button(description="تأكيد", button_style="success")
+            # تعديل المؤشر
+            if len(words) == 0:
+                current_index[0] = 0
+            elif idx >= len(words):
+                current_index[0] = len(words) - 1
+
+            update_view()
+            if len(words) == 0:
+                print("اكتملت المراجعة")
+
         btn_prev = widgets.Button(description="السابق", button_style="info")
-        btn_skip = widgets.Button(description="تخطي", button_style="warning")
+        btn_confirm = widgets.Button(description="تأكيد", button_style="success")
+        btn_next = widgets.Button(description="التالي", button_style="info")
         btn_del = widgets.Button(description="حذف", button_style="danger")
-        btn_confirm.on_click(on_confirm)
         btn_prev.on_click(on_prev)
-        btn_skip.on_click(on_skip)
+        btn_confirm.on_click(on_confirm)
+        btn_next.on_click(on_next)
         btn_del.on_click(on_delete)
 
         ui = widgets.VBox([
@@ -184,8 +207,7 @@ class ReviewUI:
                 ),
             ),
             txt_input,
-            status_check,
-            widgets.HBox([btn_prev, btn_confirm, btn_skip, btn_del]),
+            widgets.HBox([btn_prev, btn_confirm, btn_del, btn_next]),
         ])
 
         display(ui)
@@ -202,7 +224,7 @@ class ReviewUI:
 
         total = len(words)
         print(f"\nكلمات للمراجعة: {total}")
-        print("الأوامر: [n] التالي | [p] السابق | [s] تخطي | [d] حذف | [q] خروج")
+        print("الأوامر: [n] التالي | [p] السابق | [d] حذف | [q] خروج")
         print("للتصحيح: اكتب النص الجديد ثم اضغط Enter\n")
 
         idx = 0
@@ -224,7 +246,7 @@ class ReviewUI:
 
             if user_input == "q":
                 break
-            elif user_input == "n" or user_input == "s":
+            elif user_input == "n":
                 idx = min(total - 1, idx + 1)
             elif user_input == "p":
                 idx = max(0, idx - 1)
@@ -234,6 +256,9 @@ class ReviewUI:
                 total = len(words)
                 if idx >= total and idx > 0:
                     idx = total - 1
+                if total == 0:
+                    print("اكتملت المراجعة")
+                    break
                 print("تم الحذف")
             elif user_input:
                 original = row["predicted_text"] or ""
@@ -241,6 +266,13 @@ class ReviewUI:
                 if original != user_input:
                     self.log_correction(rid, original, user_input, "verified")
                 print(f"تم التحديث: '{original}' -> '{user_input}'")
-                idx = min(total - 1, idx + 1)
+                words.pop(idx)
+                total = len(words)
+                if idx >= total and idx > 0:
+                    idx = total - 1
+                if total == 0:
+                    print("اكتملت المراجعة")
+                    break
 
-        print("\nانتهت المراجعة.")
+        if total > 0:
+            print("\nانتهت المراجعة.")

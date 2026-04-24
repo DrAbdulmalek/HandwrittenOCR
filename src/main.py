@@ -34,7 +34,7 @@ def main(config: Config | None = None):
     # تحميل المدققات الإملائية
     init_correctors()
 
-    # تحميل محرك التعرف
+    # تحميل محرك التعرف (مع تحميل LoRA تلقائياً إذا وُجد)
     start = time.time()
     ocr_engine = OCREngine(
         trocr_model_name=config.trocr_model_name,
@@ -43,8 +43,13 @@ def main(config: Config | None = None):
         cache_dir=config.model_cache_dir,
         hf_token=config.hf_token,
         trocr_default_confidence=config.trocr_default_confidence,
+        lora_save_path=config.lora_save_path,
     )
     logger.info(f"تم تحميل النماذج في {time.time() - start:.2f} ثانية")
+    if ocr_engine.lora_loaded:
+        print("تم تحميل النموذج المُحسَّن (LoRA)")
+    else:
+        print("يستخدم النموذج الأساسي")
 
     # تهيئة قاعدة البيانات
     db = HandwritingDB(config.db_path)
