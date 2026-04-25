@@ -63,8 +63,9 @@ def finetune_trocr_lora(
     trocr_processor = ocr_engine.trocr_processor
     device = ocr_engine.device
 
-    # فحص عدد العينات
+    # فحص عدد العينات (تضمين verified و sentence_corrected)
     verified = db.get_verified()
+    verified = [w for w in verified if w.get('status') in ('verified', 'sentence_corrected')]
     if len(verified) < min_samples:
         print(f"لديك {len(verified)} عينة فقط. الحد الأدنى المطلوب: {min_samples}.")
         return False

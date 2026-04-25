@@ -31,8 +31,11 @@ def export_finetuning_dataset(
     """
     verified = db.get_verified()
 
+    # تضمين الكلمات المصححة على مستوى الكلمات والجمل
+    verified = [w for w in verified if w.get('status') in ('verified', 'sentence_corrected')]
+
     if not verified:
-        logger.warning("لا توجد بيانات موثقة (verified) للتصدير")
+        logger.warning("لا توجد بيانات موثقة (verified أو sentence_corrected) للتصدير")
         return None
 
     os.makedirs(output_dir, exist_ok=True)

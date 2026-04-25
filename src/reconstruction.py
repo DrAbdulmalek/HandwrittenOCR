@@ -2,6 +2,7 @@
 HandwrittenOCR - إعادة تجميع الجمل
 ====================================
 إعادة تجميع الكلمات المراجعة إلى جمل مع دعم RTL للعربية.
+يدعم حالتي verified و sentence_corrected.
 """
 
 import logging
@@ -13,12 +14,13 @@ logger = logging.getLogger("HandwrittenOCR")
 
 def reconstruct_sentences(
     db,
-    y_tolerance: int = 25
-) -> pd.DataFrame | None:
+    y_tolerance: int = 25,
+    include_sentence_corrected: bool = True
+) -> list[dict] | None:
     """
     إعادة تجميع الكلمات المراجعة إلى جمل.
 
-    يعمل على الكلمات الموثقة (verified) ويجمعها حسب:
+    يعمل على الكلمات الموثقة (verified و sentence_corrected) ويجمعها حسب:
     1. رقم الصفحة
     2. موقع Y (الأسطر)
     3. موقع X (مع دعم RTL للعربية)
@@ -26,11 +28,18 @@ def reconstruct_sentences(
     Parameters:
         db: كائن قاعدة البيانات
         y_tolerance: الحد الأدنى لتباعد Y للنظر في الكلمات على نفس السطر
+        include_sentence_corrected: تضمين الكلمات المصححة على مستوى الجمل
 
     Returns:
-        DataFrame بالجمل أو None عند عدم وجود بيانات
+        قائمة من القواميس [{page, text, lang, word_ids}, ...] أو None
     """
     words = db.get_verified()
+
+    # فلترة الكلمات المصححة فقط
+    if include_sentence_corrected:
+        words = [w for w in words if w.get('status') in ('verified', 'sentence_corrected')]
+    else:
+        words = [w for w in words if w.get('status') == 'verified']
 
     if not words:
         logger.info("لا توجد كلمات موثقة لإعادة التجمع")
@@ -72,16 +81,43 @@ def reconstruct_sentences(
                 reverse=(lang == "ar")
             )
             sentence = " ".join(str(w["predicted_text"]) for w in sorted_line)
+            word_ids = [w["image_id"] for w in sorted_line]
 
             all_sentences.append({
                 "page": page,
                 "text": sentence,
                 "lang": lang,
+                "word_ids": word_ids,
             })
 
     if not all_sentences:
         return None
 
-    df_result = pd.DataFrame(all_sentences)
-    logger.info(f"تم تجميع {len(df_result)} جملة")
-    return df_result
+    logger.info(f"تم تجميع {len(all_sentences)} جملة")
+    return all_sentences
+
+
+def derive_word_corrections(original: str, corrected: str) -> list[dict]:
+    """
+    استخراج تصحيحات على مستوى الكلمات من تصحيح جملة.
+    يعمل فقط عندما يتطابق عدد الكلمات.
+
+    Parameters:
+        original: الجملة الأصلية
+        corrected: الجملة المصححة
+
+    Returns:
+        قائمة التصحيحات المشتقة [{original, corrected}, ...]
+    """
+    orig_words = original.split()
+    corr_words = corrected.split()
+
+    if len(orig_words) != len(corr_words):
+        return []
+
+    derived = []
+    for o, c in zip(orig_words, corr_words):
+        if o != c:
+            derived.append({"original": o, "corrected": c})
+
+    return derived

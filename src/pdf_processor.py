@@ -6,12 +6,14 @@ HandwrittenOCR - معالجة PDF
 - التعرف بالـ Ensemble (TrOCR + EasyOCR)
 - قاموس تصحيح مستمر
 - إحداثيات الموقع ورقم الصفحة
+- نظام Checkpoint لاستئناف المعالجة
 """
 
 import cv2
 import json
 import time
 import logging
+import os
 from datetime import datetime
 from pdf2image import convert_from_path
 import numpy as np
@@ -35,12 +37,19 @@ class PDFProcessor:
         self.config = config
         self.ocr = ocr_engine
         self.db = db
+        self.checkpoint_file = os.path.join(config.output_dir, 'ocr_checkpoint.json')
 
-    def process(self) -> dict:
-        """معالجة ملف PDF كاملاً مع Ensemble وقاموس التصحيح."""
+    def process(self, resume: bool = True) -> dict:
+        """معالجة ملف PDF كاملاً مع Ensemble وقاموس التصحيح ونظام Checkpoint."""
         start_time = time.time()
         pages_start = self.config.pages_start
         pages_end = self.config.pages_end
+
+        # استئناف من checkpoint
+        checkpoint = self._load_checkpoint() if resume else None
+        if checkpoint:
+            logger.info(f"استئناف من الصفحة {checkpoint['last_page_processed']}")
+            pages_start = checkpoint['last_page_processed']
 
         logger.info(f"بدء معالجة: {self.config.pdf_path}")
         logger.info(f"نطاق الصفحات: {pages_start} إلى {pages_end}")
@@ -70,7 +79,7 @@ class PDFProcessor:
             logger.error(f"فشل تحويل PDF: {e}")
             return self._empty_stats()
 
-        total_words = 0
+        total_words = checkpoint.get('processed_words', 0) if checkpoint else 0
         failed_ocr = 0
         corrected_by_spell = 0
         corrected_by_dict = 0
@@ -102,8 +111,6 @@ class PDFProcessor:
             boxes_info = self._match_boxes_with_detections(
                 boxes, easyocr_detections
             )
-
-            preview = img_bgr.copy()
 
             for (x, y, w, h), easyocr_raw in boxes_info:
                 crop = img_bgr[y:y + h, x:x + w]
@@ -141,11 +148,15 @@ class PDFProcessor:
                     page_num=page_num,
                 )
 
-                cv2.rectangle(preview, (x, y), (x + w, y + h), (0, 255, 0), 2)
                 total_words += 1
 
-            preview_path = f"{self.config.output_dir}/preview_page_{page_num}.png"
-            cv2.imwrite(preview_path, preview)
+            # حفظ checkpoint بعد كل صفحة
+            self._save_checkpoint(
+                page_num + 1, pages_end, total_words
+            )
+
+        # مسح checkpoint عند الاكتمال
+        self._clear_checkpoint()
 
         elapsed = time.time() - start_time
         stats = {
@@ -171,32 +182,55 @@ class PDFProcessor:
 
         return stats
 
+    def _save_checkpoint(self, page_num: int, total_pages: int, processed_words: int) -> None:
+        """حفظ checkpoint لاستئناف المعالجة"""
+        checkpoint = {
+            'last_page_processed': page_num,
+            'total_pages': total_pages,
+            'processed_words': processed_words,
+            'timestamp': datetime.now().isoformat()
+        }
+        try:
+            with open(self.checkpoint_file, 'w', encoding='utf-8') as f:
+                json.dump(checkpoint, f, indent=2, ensure_ascii=False)
+            logger.info(f"تم حفظ checkpoint: الصفحة {page_num}/{total_pages}")
+        except Exception as e:
+            logger.warning(f"فشل حفظ checkpoint: {e}")
+
+    def _load_checkpoint(self) -> dict | None:
+        """تحميل checkpoint"""
+        if os.path.exists(self.checkpoint_file):
+            try:
+                with open(self.checkpoint_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except Exception:
+                return None
+        return None
+
+    def _clear_checkpoint(self) -> None:
+        """مسح checkpoint عند الاكتمال"""
+        if os.path.exists(self.checkpoint_file):
+            try:
+                os.remove(self.checkpoint_file)
+                logger.info("تم مسح checkpoint")
+            except Exception:
+                pass
+
     def _match_boxes_with_detections(
         self,
         boxes: list,
         easyocr_detections: list
     ) -> list:
-        """
-        ربط المستطيلات المحيطة مع كشف EasyOCR.
-
-        Parameters:
-            boxes: قائمة (x, y, w, h) من التجزئة
-            easyocr_detections: قائمة [bbox, text, conf] من EasyOCR
-
-        Returns:
-            قائمة [(box, easyocr_raw_or_None), ...]
-        """
+        """ربط المستطيلات المحيطة مع كشف EasyOCR."""
         if not easyocr_detections:
             return [(box, None) for box in boxes]
 
-        # تحويل كشف EasyOCR إلى مستطيلات
         det_boxes = []
         for det in easyocr_detections:
             pts = np.array(det[0], dtype=np.int32)
             x, y, w, h = cv2.boundingRect(pts)
             det_boxes.append(((x, y, w, h), det))
 
-        # مطابقة: لكل box من التجزئة، أوجد أقرب كشف EasyOCR
         boxes_info = []
         used_dets = set()
 
